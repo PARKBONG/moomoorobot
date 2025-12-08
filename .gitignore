@@ -1,0 +1,5 @@
+# Python
+*.pyc
+
+# Visuion Model (AI)
+*.pt
