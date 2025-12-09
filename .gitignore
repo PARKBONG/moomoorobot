@@ -5,5 +5,5 @@
 *.pt
 
 # generated data
-.json
-.jpeg
+*.json
+*.jpeg

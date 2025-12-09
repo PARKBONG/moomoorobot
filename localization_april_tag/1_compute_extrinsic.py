@@ -36,6 +36,20 @@ WINDOW_NAME = "AprilTag 실시간 보기"
 JSON_FILENAME = "extrinsic_calibration_result.json"
 IMG_FILENAME = "extrinsic_calibration_result.jpeg"
 
+# 8) 태그 좌표계와 로봇 베이스 좌표계의 축 매핑
+# tag / robot
+# +x / +x
+# +y / -y
+# +z / -z
+#
+# 로봇 베이스 프레임에서의 벡터 p_robot 를 태그 프레임 p_tag 로 표현할 때:
+#   p_tag = R_ROBOT_TO_TAG @ p_robot
+R_ROBOT_TO_TAG = np.array([
+    [1.0,  0.0,  0.0],
+    [0.0, -1.0,  0.0],
+    [0.0,  0.0, -1.0],
+], dtype=float)
+
 # 설정 부분 끝 =================================================
 
 
@@ -136,7 +150,7 @@ def compute_world_from_tags(tag_translations, tag_rotations):
       - (1,3) 쌍 또는 (2,4) 쌍 중 하나 이상이 반드시 보여야 함.
       - 그렇지 않으면 ValueError 발생.
 
-    월드 좌표계 정의:
+    월드(=로봇 베이스) 좌표계 정의:
       - 원점(origin):
         * (1,3)이 보이면 mid13 = (t1 + t3)/2
         * (2,4)가 보이면 mid24 = (t2 + t4)/2
@@ -144,11 +158,13 @@ def compute_world_from_tags(tag_translations, tag_rotations):
         * 둘 중 하나만 보이면 그 중점만 사용
       - 축(orientation):
         * 현재 보이는 코너 태그들(1,2,3,4)의 회전행렬을 모두 평균낸 뒤,
-          SVD를 이용해 SO(3)에 투영하여 최종 R을 얻음.
-        * 월드 x,y,z축 = 이 평균 회전행렬이 정의하는 축
+          SVD를 이용해 SO(3)에 투영하여 태그축 기준 월드 회전 R_cam_world_tag 를 얻음.
+        * 이후 R_ROBOT_TO_TAG 를 우측 곱하여
+          로봇 베이스 축을 따르는 R_cam_world_robot 를 구성.
+          (결과적으로 world = robot base frame)
 
     반환:
-      T_camera_world : 4x4 행렬 (월드 -> 카메라)
+      T_camera_world : 4x4 행렬 (월드(로봇 베이스) -> 카메라)
                        p_cam = R * p_world + t
     """
     present = set(tag_translations.keys()) & set(CORNER_TAG_IDS)
@@ -179,23 +195,32 @@ def compute_world_from_tags(tag_translations, tag_rotations):
     # 한 쌍 또는 두 쌍의 중점을 평균 내어 원점으로 사용
     origin_cam = np.mean(centers, axis=0)
 
-    # --- 축(orientation) 계산 ---------------------------------------------
-    # 현재 보이는 코너 태그들의 회전행렬을 모두 평균낸 뒤 SVD로 SO(3)에 투영
+    # --- 태그 회전행렬 평균 후 SVD로 정규화 (태그 축 기준 world 회전) -----
     R_list = [tag_rotations[tid] for tid in CORNER_TAG_IDS if tid in present]
     R_stack = np.stack(R_list, axis=0)  # (N, 3, 3)
     R_mean = R_stack.mean(axis=0)       # (3, 3)
 
     U, _, Vt = np.linalg.svd(R_mean)
-    R_cam_world = U @ Vt
+    R_cam_world_tag = U @ Vt  # world(tag 축) -> camera
 
     # det(R) < 0 인 경우 반사(reflection) 방지
-    if np.linalg.det(R_cam_world) < 0:
+    if np.linalg.det(R_cam_world_tag) < 0:
         U[:, -1] *= -1
-        R_cam_world = U @ Vt
+        R_cam_world_tag = U @ Vt
 
-    # --- 4x4 변환행렬 구성 -------------------------------------------------
+    # ---------------------------------------------------------
+    # 로봇 베이스 축 정의 반영
+    #
+    # p_cam = R_cam_world_tag * p_world_tag + t
+    # p_world_tag = R_ROBOT_TO_TAG * p_world_robot
+    # => p_cam = (R_cam_world_tag @ R_ROBOT_TO_TAG) * p_world_robot + t
+    # 따라서 R_cam_world_robot = R_cam_world_tag @ R_ROBOT_TO_TAG
+    # ---------------------------------------------------------
+    R_cam_world_robot = R_cam_world_tag @ R_ROBOT_TO_TAG
+
+    # --- 4x4 변환행렬 구성 (world = 로봇 베이스 프레임) --------------------
     T_camera_world = np.eye(4, dtype=float)
-    T_camera_world[0:3, 0:3] = R_cam_world
+    T_camera_world[0:3, 0:3] = R_cam_world_robot
     T_camera_world[0:3, 3] = origin_cam
 
     return T_camera_world
@@ -206,14 +231,21 @@ def save_extrinsic_to_json(T_camera_world, json_path):
     extrinsic 결과를 JSON 파일로 저장하는 함수.
 
     저장 내용:
-      - T_camera_world : 월드 -> 카메라 4x4 행렬
+      - T_camera_world : world(=robot base) -> camera (4x4)
+      - T_world_camera : camera -> world(=robot base) (4x4)
     """
+    T_world_camera = np.linalg.inv(T_camera_world)
+
     data = {
-        "T_camera_world": T_camera_world.tolist(),
+        "T_camera_world": T_camera_world.tolist(),   # world(=robot base) -> camera
+        "T_world_camera": T_world_camera.tolist(),   # camera -> world(=robot base)
         "comment": (
+            "World frame is robot base. "
+            "Axes mapping: +x_tag->+x_robot, +y_tag->-y_robot, +z_tag->-z_robot. "
             "T_camera_world: world->camera (4x4). "
             "World origin: midpoint(s) of visible diagonal pairs (1,3) and/or (2,4). "
-            "Orientation: average of rotations of visible corner tags (1,2,3,4)."
+            "Orientation: average of rotations of visible corner tags (1,2,3,4), "
+            "then converted from tag axes to robot base axes."
         ),
         "corner_tag_ids_clockwise": CORNER_TAG_IDS,
         "corner_tag_sizes_m": CORNER_TAG_SIZES_M,

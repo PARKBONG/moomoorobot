@@ -12,7 +12,7 @@ from pupil_apriltags import Detector
 #    - 아래 JSON 예시처럼 fx, fy, cx, cy, dist_coeffs 가 들어있는 파일
 #    - 예: calib_realsense_d405.json
 # 현재 파일(0_visualize_any_tag_realtime.py) 기준 상대 경로임!
-CALIB_JSON_PATH = "./../camera_intrinsic_estimation/intrinsic_calibration_result__20251209_135556.json"
+CALIB_JSON_PATH = "./../camera_intrinsic_estimation/intrinsic_calibration_result_20251209_135556.json"
 
 # 2) 사용하려는 AprilTag 패밀리 이름
 #    - tag36h11 체커보드를 썼다면 "tag36h11"
@@ -191,6 +191,14 @@ def main():
                 axis_len = 0.04  # 4 cm 정도 길이
                 origin_cam = t.reshape(3)  # 태그 중심(카메라 좌표계)
 
+                # Z축이 카메라를 향하는지 확인 (정상적인 경우 Z축은 카메라 쪽을 향함)
+                z_axis_direction = R[:, 2]  # 태그의 Z축 방향 벡터
+                
+                # 태그 중심에서 카메라 방향으로의 벡터 (단위 벡터로 정규화)
+                to_camera = origin_cam / np.linalg.norm(origin_cam)
+
+                dot_product = np.dot(z_axis_direction, to_camera)
+
                 x_axis_cam = origin_cam + R[:, 0] * axis_len
                 y_axis_cam = origin_cam + R[:, 1] * axis_len
                 z_axis_cam = origin_cam + R[:, 2] * axis_len
@@ -209,7 +217,8 @@ def main():
                         cv2.line(frame, o_uv, y_uv, (0, 255, 0), 2)
                     # Z축: 파랑
                     if z_uv is not None:
-                        cv2.line(frame, o_uv, z_uv, (255, 0, 0), 2)
+                        z_color = (255, 0, 0) if dot_product > 0 else (0, 165, 255)  # 파랑 or 주황
+                        cv2.line(frame, o_uv, z_uv, z_color, 2)
 
                 # --- 4) 태그 ID 및 (x,y,z) 위치 텍스트로 표시 --------------
                 x_m, y_m, z_m = t.flatten()
