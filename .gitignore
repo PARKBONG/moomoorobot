@@ -3,3 +3,7 @@
 
 # Visuion Model (AI)
 *.pt
+
+# generated data
+.json
+.jpeg
