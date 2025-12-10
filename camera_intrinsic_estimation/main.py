@@ -32,7 +32,7 @@ MIN_SAMPLES = 50
 ADJUST_WIN_SIZE = 1.0
 
 # 6) 샘플 이미지 저장 여부
-SAVE = True  # True면 images/0.jpeg, 1.jpeg ... 저장, False면 저장 안 함
+SAVE = False  # True면 images/0.jpeg, 1.jpeg ... 저장, False면 저장 안 함
 
 # 설정 부분 끝 =================================================
 
