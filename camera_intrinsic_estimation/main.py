@@ -28,6 +28,12 @@ CAMERA_INDEX = 0
 # 4) 최소 촬영 장수 (너무 적으면 보정 정확도가 떨어짐)
 MIN_SAMPLES = 50
 
+# 5) 시각화용 윈도우 크기 조정 비율 (기본값: 1.0)
+ADJUST_WIN_SIZE = 1.0
+
+# 6) 샘플 이미지 저장 여부
+SAVE = True  # True면 images/0.jpeg, 1.jpeg ... 저장, False면 저장 안 함
+
 # 설정 부분 끝 =================================================
 
 # ============================================================
@@ -56,7 +62,7 @@ def create_object_points(PATTERN_SIZE, SQUARE_SIZE):
 # ============================================================
 # 카메라에서 이미지 캡처 + 체커보드 코너 찾기
 # ============================================================
-def capture_calibration_images(cap, PATTERN_SIZE, objp, MIN_SAMPLES):
+def capture_calibration_images(cap, PATTERN_SIZE, objp, MIN_SAMPLES, SAVE):
     """
     실시간으로 카메라 화면을 보여주면서,
     체커보드를 인식하면 SPACE로 한 장씩 캡처하는 함수.
@@ -67,6 +73,17 @@ def capture_calibration_images(cap, PATTERN_SIZE, objp, MIN_SAMPLES):
     objpoints = []  # 3D 점 (월드 좌표계)
     imgpoints = []  # 2D 점 (이미지 좌표계)
     sample_count = 0
+
+    # 이미지 저장 폴더 준비
+    images_dir = None
+    if SAVE:
+        current_file_path = os.path.abspath(__file__)
+        current_dir = os.path.dirname(current_file_path)
+        images_dir = os.path.join(current_dir, "images")
+        os.makedirs(images_dir, exist_ok=True)
+        print(f"[INFO] 이미지 저장 모드: ON  (폴더: {images_dir})")
+    else:
+        print("[INFO] 이미지 저장 모드: OFF")
 
     print("=== 카메라 보정 시작 ===")
     print(f"- 체커보드 코너 개수 (가로, 세로): {PATTERN_SIZE}")
@@ -122,17 +139,35 @@ def capture_calibration_images(cap, PATTERN_SIZE, objp, MIN_SAMPLES):
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2,
                     cv2.LINE_AA)
 
-        cv2.imshow("Camera Calibration", display)
+        # 윈도우 크기 조정 (시각화용)
+        if ADJUST_WIN_SIZE is not None and ADJUST_WIN_SIZE > 0:
+            h, w = display.shape[:2]
+            new_w = int(w * ADJUST_WIN_SIZE)
+            new_h = int(h * ADJUST_WIN_SIZE)
+            display_resized = cv2.resize(display, (new_w, new_h), interpolation=cv2.INTER_AREA)
+        else:
+            display_resized = display
+            
+        cv2.imshow("Camera Calibration", display_resized)
         key = cv2.waitKey(1) & 0xFF
 
         if key == 27:  # ESC
             # 촬영 종료
             break
         elif key == 32 and found:  # SPACE + 체커보드 인식
+            # 저장 전 sample index (파일 이름용)
+            sample_idx = sample_count
+
             objpoints.append(objp.copy())
             imgpoints.append(corners_refined)
             sample_count += 1
             print(f"[INFO] 캡처 완료: {sample_count} 장")
+
+            # 이미지 파일 저장
+            if SAVE and images_dir is not None:
+                img_path = os.path.join(images_dir, f"{sample_idx}.jpeg")
+                cv2.imwrite(img_path, frame)
+                print(f"        → 이미지 저장: {img_path}")
 
             if sample_count >= MIN_SAMPLES:
                 print("충분한 샘플이 모였습니다. 원하시면 ESC로 종료 후 보정을 진행하세요.")
@@ -232,7 +267,7 @@ def main():
 
     # 체커보드 캡처
     objpoints, imgpoints, gray = capture_calibration_images(
-        cap, PATTERN_SIZE, objp, MIN_SAMPLES
+        cap, PATTERN_SIZE, objp, MIN_SAMPLES, SAVE
     )
 
     cap.release()
