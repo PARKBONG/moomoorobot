@@ -17,9 +17,10 @@ from april_tag_tracker import AprilTagTracker
 
 
 tracker = AprilTagTracker(
+    camera_index=1,  # 0 or 1 or 2. 너가 쓰는 카메라에 따라 바꿔야댐
     pop_window=False, # 이거 바꿔보셈
-    intrinsic_path="./../camera_intrinsic_estimation/intrinsic_calibration_result_20251210_115333.json",
-    extrinsic_path="./../localization_april_tag/extrinsic_calibration_result.json",
+    intrinsic_path="./../camera_basic/intrinsic_calibration_result.json", # 너가 이거 직접 만들어야댐
+    extrinsic_path="./../camera_basic/extrinsic_calibration_result.json", # 이것도. 
 )
 
 OBJECT_TAG = 5

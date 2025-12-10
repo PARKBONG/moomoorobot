@@ -42,9 +42,12 @@ class AprilTagTracker:
         self.tags = {}
 
         # camera & extrinsic & detector
-        self.K = None
+        self.K_orig = None          # 보정 시 사용된 원래 K
+        self.K = None               # 현재 사용 중인 K (getOptimalNewCameraMatrix 결과)
         self.dist_coeffs = None
         self.camera_params = None
+        self.calib_image_size = None  # (w, h)
+
         self.T_camera_world = None
         self.T_world_camera = None
         self.R_wc = None
@@ -89,11 +92,23 @@ class AprilTagTracker:
             data = json.load(f)
 
         intr = data["intrinsics"]
-        fx, fy, cx, cy = intr["fx"], intr["fy"], intr["cx"], intr["cy"]
+        fx = float(intr["fx"])
+        fy = float(intr["fy"])
+        cx = float(intr["cx"])
+        cy = float(intr["cy"])
 
-        self.K = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]], float)
+        K = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]], float)
+        self.K_orig = K.copy()
+        self.K = K.copy()
+
         self.dist_coeffs = np.array(data["dist_coeffs"], float)
         self.camera_params = (fx, fy, cx, cy)
+
+        # 보정에 사용된 해상도(있으면) 저장
+        if "image_size" in data:
+            w, h = data["image_size"]
+            self.calib_image_size = (int(w), int(h))
+            print(f"[INFO] 보정에 사용된 이미지 해상도: {w} x {h}")
 
     def _load_extrinsic_params(self):
         if self.extrinsic_path is None:
@@ -125,6 +140,35 @@ class AprilTagTracker:
         self.cap = cv2.VideoCapture(self.camera_index)
         if not self.cap.isOpened():
             raise RuntimeError("카메라 열기 실패")
+
+        # 보정에 사용한 해상도에 맞추어 해상도 설정 시도
+        if self.calib_image_size is not None:
+            calib_w, calib_h = self.calib_image_size
+            print(f"[INFO] 보정 해상도에 맞추어 카메라 해상도 설정 시도: {calib_w} x {calib_h}")
+            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, calib_w)
+            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, calib_h)
+
+        # 실제 해상도 확인
+        w = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        h = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        print(f"[INFO] 실제 카메라 해상도: {w} x {h}")
+
+        if self.calib_image_size is not None and (w != self.calib_image_size[0] or h != self.calib_image_size[1]):
+            print("[WARN] 실제 카메라 해상도가 보정에 사용된 해상도와 다릅니다. "
+                  "Intrinsic과 정확히 일치하지 않을 수 있습니다.")
+
+        # getOptimalNewCameraMatrix 로 새 K 계산
+        new_K, _ = cv2.getOptimalNewCameraMatrix(self.K_orig, self.dist_coeffs, (w, h), 1)
+        self.K = new_K
+        print("[INFO] getOptimalNewCameraMatrix로 얻은 새 K:")
+        print(self.K)
+
+        # camera_params도 새 K 기준으로 업데이트
+        new_fx = float(self.K[0, 0])
+        new_fy = float(self.K[1, 1])
+        new_cx = float(self.K[0, 2])
+        new_cy = float(self.K[1, 2])
+        self.camera_params = (new_fx, new_fy, new_cx, new_cy)
 
     # ---------------------------------------------------------
     # 기본 수학 함수
@@ -203,7 +247,6 @@ class AprilTagTracker:
         등록된 태그 ID만 pose 계산.
         반환값: { ID: [float...], ... }
         """
-        
         if self.cap is None or not self.cap.isOpened():
             return {}
     
@@ -211,7 +254,9 @@ class AprilTagTracker:
         if not ret:
             return {}
 
-        frame = cv2.undistort(frame_raw, self.K, self.dist_coeffs)
+        # 보정 시 K_orig, dist 기준으로 undistort하고,
+        # 결과 이미지는 self.K (new_K) 기준.
+        frame = cv2.undistort(frame_raw, self.K_orig, self.dist_coeffs, None, self.K)
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
         detections = self.detector.detect(

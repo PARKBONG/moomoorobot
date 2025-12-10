@@ -7,3 +7,6 @@
 # generated data
 *.json
 *.jpeg
+
+# Exception: Include JSON files in data folder
+!data/*
