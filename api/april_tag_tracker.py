@@ -1,4 +1,4 @@
-# api.py
+# api_multi.py
 
 import os
 import json
@@ -10,50 +10,27 @@ from pupil_apriltags import Detector
 
 class AprilTagTracker:
     """
-    AprilTag 하나의 위치/자세를 쉽게 얻기 위한 간단한 클래스.
-    get_pose()는 [x, y, z, rx_deg, ry_deg, rz_deg] 반환.
+    하나의 카메라로 여러 AprilTag를 추적하는 클래스.
+    
+    사용자가 쓰는 함수는 주로 하나:
+        get_pose(ID)
 
-    사용 예시)
-        from api import AprilTagTracker
-
-        tag = AprilTagTracker(
-            ID=5,
-            size_cm=7.0,
-            pop_window=True,
-            tag_family="tag36h11",
-            camera_index=0,
-            intrinsic_path="./intrinsic_calibration_result.json",
-            extrinsic_path="./extrinsic_calibration_result.json",
-        )
-
-        pose = tag.get_pose()  # [x, y, z, roll, pitch, yaw]
-        print(pose)
+    사용 예:
+        tracker = AprilTagTracker(pop_window=True, ...)
+        tracker.add_tag(5, 2.0)  # ID=5, 크기 2cm
+        pose = tracker.get_pose(5)
+        print(pose)  # [x, y, z, rx_deg, ry_deg, rz_deg]
     """
 
     def __init__(
         self,
-        ID,
-        size_cm,
-        pop_window=True,
+        pop_window=False,
         tag_family="tag36h11",
         camera_index=0,
         intrinsic_path=None,
         extrinsic_path=None,
         window_name="AprilTag Pose Viewer",
     ):
-        
-        """
-        ID           : 인식할 AprilTag ID (정수)
-        size_cm      : 태그 한 변 길이 (cm 단위)
-        pop_window   : True이면 화면 시각화 (카메라 영상, 선/텍스트 표시)
-        tag_family   : AprilTag 패밀리 이름 (예: "tag36h11")
-        camera_index : 카메라 인덱스 (기본 0)
-        intrinsic_path : 카메라 내부 파라미터 JSON 경로
-        extrinsic_path : 카메라-월드(로봇 베이스) 외부 파라미터 JSON 경로
-        """
-        
-        self.tag_id = int(ID)
-        self.tag_size_m = float(size_cm) / 100.0  # cm → m
         self.pop_window = bool(pop_window)
         self.tag_family = tag_family
         self.camera_index = camera_index
@@ -61,6 +38,10 @@ class AprilTagTracker:
         self.extrinsic_path = extrinsic_path
         self.window_name = window_name
 
+        # 등록된 태그 정보 {id: size_m}
+        self.tags = {}
+
+        # camera & extrinsic & detector
         self.K = None
         self.dist_coeffs = None
         self.camera_params = None
@@ -79,7 +60,20 @@ class AprilTagTracker:
         self._open_camera()
 
     # ---------------------------------------------------------
-    # 내부 파일/초기화
+    # 태그 관리
+    # ---------------------------------------------------------
+    def add_tag(self, ID, size_cm):
+        """추적할 태그 등록 (ID: 정수, size_cm: cm 단위)"""
+        self.tags[int(ID)] = float(size_cm) / 100.0  # cm → m
+
+    def remove_tag(self, ID):
+        """태그 제거"""
+        ID = int(ID)
+        if ID in self.tags:
+            del self.tags[ID]
+
+    # ---------------------------------------------------------
+    # 내부 로드 함수들
     # ---------------------------------------------------------
     def _resolve_path(self, path):
         cur = os.path.abspath(__file__)
@@ -88,7 +82,7 @@ class AprilTagTracker:
 
     def _load_camera_params(self):
         if self.intrinsic_path is None:
-            raise ValueError("intrinsic_path 가 지정되지 않았습니다.")
+            raise ValueError("intrinsic_path 가 없습니다.")
         json_path = self._resolve_path(self.intrinsic_path)
 
         with open(json_path, "r", encoding="utf-8") as f:
@@ -103,7 +97,7 @@ class AprilTagTracker:
 
     def _load_extrinsic_params(self):
         if self.extrinsic_path is None:
-            raise ValueError("extrinsic_path 가 지정되지 않았습니다.")
+            raise ValueError("extrinsic_path 가 없습니다.")
         json_path = self._resolve_path(self.extrinsic_path)
 
         with open(json_path, "r", encoding="utf-8") as f:
@@ -130,10 +124,10 @@ class AprilTagTracker:
     def _open_camera(self):
         self.cap = cv2.VideoCapture(self.camera_index)
         if not self.cap.isOpened():
-            raise RuntimeError("카메라를 열 수 없습니다.")
+            raise RuntimeError("카메라 열기 실패")
 
     # ---------------------------------------------------------
-    # 기본 수학 함수들
+    # 기본 수학 함수
     # ---------------------------------------------------------
     @staticmethod
     def _project_point(K, p_cam):
@@ -146,9 +140,6 @@ class AprilTagTracker:
 
     @staticmethod
     def _rotation_matrix_to_rpy(R):
-        """
-        회전행렬 → roll, pitch, yaw (라디안)
-        """
         sy = -R[2, 0]
         sy = np.clip(sy, -1.0, 1.0)
         pitch = math.asin(sy)
@@ -157,17 +148,20 @@ class AprilTagTracker:
         return roll, pitch, yaw
 
     # ---------------------------------------------------------
-    # 시각화 함수
+    # 시각화용 함수들
     # ---------------------------------------------------------
     def _draw_world_origin_axes(self, frame, axis_len=0.2):
+        """
+        월드(로봇 베이스) 원점과 XYZ 축을 카메라 영상 위에 표시.
+        """
         R_cw = self.T_camera_world[:3, :3]
         t_cw = self.T_camera_world[:3, 3]
 
         origin = t_cw
         axes = [
-            ("X_w", R_cw[:, 0], (0, 0, 255)),
-            ("Y_w", R_cw[:, 1], (0, 255, 0)),
-            ("Z_w", R_cw[:, 2], (255, 0, 0)),
+            ("X_w", R_cw[:, 0], (0, 0, 255)),   # X: 빨강
+            ("Y_w", R_cw[:, 1], (0, 255, 0)),   # Y: 초록
+            ("Z_w", R_cw[:, 2], (255, 0, 0)),   # Z: 파랑
         ]
 
         o_uv = self._project_point(self.K, origin)
@@ -181,34 +175,41 @@ class AprilTagTracker:
                 cv2.line(frame, o_uv, p_uv, color, 2)
                 cv2.putText(frame, name, p_uv, 0, 0.5, color, 1)
 
-    def _draw_line_with_global_text(self, frame, pos_cam, pos_world):
+    def _draw_line_with_global_text(self, frame, pos_cam, pos_world, tag_id):
+        """
+        로봇 베이스(월드 원점)에서 태그까지 선을 그리고,
+        선 위에 Global 좌표, 태그 근처에 CAM 좌표 표시.
+        """
         o_uv = self._project_point(self.K, self.origin_cam)
         p_uv = self._project_point(self.K, pos_cam)
         if not o_uv or not p_uv:
             return
 
+        # 선 그리기 (회색)
         cv2.line(frame, o_uv, p_uv, (127, 127, 127), 2)
 
+        # 선 중간 위치
         mid = ((o_uv[0] + p_uv[0]) // 2, (o_uv[1] + p_uv[1]) // 2)
 
-        text_g = "Global: (%.2f, %.2f, %.2f)" % tuple(pos_world)
-        cv2.putText(frame, text_g, (mid[0] + 5, mid[1] - 5), 0, 0.6, (0, 0, 0), 2)
-
-        text_c = "CAM: (%.2f, %.2f, %.2f)" % tuple(pos_cam)
-        cv2.putText(frame, text_c, (p_uv[0] + 5, p_uv[1] + 15), 0, 0.6, (0, 0, 0), 2)
+        text_g = f"ID {tag_id}: (%.2f, %.2f, %.2f)" % tuple(pos_world)
+        cv2.putText(frame, text_g, (mid[0] + 5, mid[1] - 5), 0, 0.6, (127, 127, 127), 2)
 
     # ---------------------------------------------------------
-    # 주요 public 메서드
+    # 내부 연산: 모든 태그 pose 계산
     # ---------------------------------------------------------
-    def get_pose(self):
+    def _compute_all_poses(self):
         """
-        AprilTag ID의 pose를 읽고
-        [x, y, z, rx_deg, ry_deg, rz_deg] 반환.
-        찾지 못하면 None.
+        detect()는 한 번만 호출하고,
+        등록된 태그 ID만 pose 계산.
+        반환값: { ID: [float...], ... }
         """
+        
+        if self.cap is None or not self.cap.isOpened():
+            return {}
+    
         ret, frame_raw = self.cap.read()
         if not ret:
-            return None
+            return {}
 
         frame = cv2.undistort(frame_raw, self.K, self.dist_coeffs)
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -217,45 +218,75 @@ class AprilTagTracker:
             gray,
             estimate_tag_pose=True,
             camera_params=self.camera_params,
-            tag_size=self.tag_size_m,
+            tag_size=1.0,  # scaling later
         )
 
-        det = next((d for d in detections if d.tag_id == self.tag_id), None)
-        if det is None:
+        results = {}
+
+        for det in detections:
+            tag_id = det.tag_id
+            if tag_id not in self.tags:
+                continue
+
+            size_m = self.tags[tag_id]
+
+            R_ct = np.array(det.pose_R)
+            t_ct = np.array(det.pose_t).reshape(3) * size_m
+
+            pos_cam = t_ct
+            pos_world_vec = self.R_wc @ pos_cam + self.t_wc
+
+            R_wt = self.R_wc @ R_ct
+            roll, pitch, yaw = self._rotation_matrix_to_rpy(R_wt)
+
+            x = float(pos_world_vec[0])
+            y = float(pos_world_vec[1])
+            z = float(pos_world_vec[2])
+            rx = float(math.degrees(roll))
+            ry = float(math.degrees(pitch))
+            rz = float(math.degrees(yaw))
+
+            results[tag_id] = [x, y, z, rx, ry, rz]
+
+            # 시각화: 태그별 선/텍스트
             if self.pop_window:
-                cv2.putText(frame, "Tag not found", (30, 40), 0, 0.7, (0, 0, 255), 2)
-                cv2.imshow(self.window_name, frame)
-                cv2.waitKey(1)
-            return None
+                self._draw_line_with_global_text(frame, pos_cam, [x, y, z], tag_id)
 
-        R_ct = np.array(det.pose_R)
-        t_ct = np.array(det.pose_t).reshape(3)
-
-        pos_cam = t_ct
-        pos_world = self.R_wc @ pos_cam + self.t_wc
-
-        # 회전 변환 (월드 기준)
-        R_wt = self.R_wc @ R_ct
-        roll, pitch, yaw = self._rotation_matrix_to_rpy(R_wt)
-
-        # ★ 요청 반영: degree 변환
-        rx_deg = math.degrees(roll)
-        ry_deg = math.degrees(pitch)
-        rz_deg = math.degrees(yaw)
-
+        # 시각화: 월드 축, 안내 텍스트, imshow
         if self.pop_window:
             self._draw_world_origin_axes(frame)
-            self._draw_line_with_global_text(frame, pos_cam, pos_world)
-            cv2.putText(frame, "ESC to close", (30, 30), 0, 0.7, (0, 0, 0), 2)
+            cv2.putText(
+                frame,
+                "ESC: close window",
+                (30, 30),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.7,
+                (0, 0, 0),
+                2,
+            )
             cv2.imshow(self.window_name, frame)
-            if cv2.waitKey(1) & 0xFF == 27:
-                self.close()
 
-        return [pos_world[0], pos_world[1], pos_world[2], rx_deg, ry_deg, rz_deg]
+        return results
 
+    # ---------------------------------------------------------
+    # public API: 단일 태그 pose만 반환
+    # ---------------------------------------------------------
+    def get_pose(self, ID):
+        """
+        ID에 해당하는 태그 pose를 Python float 리스트로 반환.
+        못 찾으면 None.
+        """
+        ID = int(ID)
+        poses = self._compute_all_poses()
+        return poses.get(ID, None)
+
+    # ---------------------------------------------------------
+    # 종료 처리
+    # ---------------------------------------------------------
     def close(self):
         if self.cap:
             self.cap.release()
+            self.cap = None
         cv2.destroyAllWindows()
 
     def __del__(self):
@@ -263,3 +294,20 @@ class AprilTagTracker:
             self.close()
         except:
             pass
+
+    def is_pressed_esc(self):
+        """
+        pop_window=True일 때만 작동.
+        ESC 또는 'q'가 눌리면 True, 아니면 False 반환.
+        """
+        if not self.pop_window:
+            return False
+
+        key = cv2.waitKey(1) & 0xFF
+
+        # ESC 또는 q 키
+        if key == 27 or key == ord('q'):
+            self.close()
+            return True
+        
+        return False
