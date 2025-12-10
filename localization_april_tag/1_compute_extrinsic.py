@@ -12,7 +12,7 @@ from pupil_apriltags import Detector
 # 1) 카메라 보정 결과(JSON) 파일 경로
 #    - fx, fy, cx, cy, dist_coeffs 가 들어있는 파일
 # 현재 파일 기준 상대 경로
-CALIB_JSON_PATH = "./../camera_intrinsic_estimation/intrinsic_calibration_result_20251209_135556.json"
+CALIB_JSON_PATH = "./../camera_intrinsic_estimation/intrinsic_calibration_result_20251210_115333.json"
 
 # 2) 사용하려는 AprilTag 패밀리 이름
 TAG_FAMILY = "tag36h11"
@@ -24,17 +24,19 @@ CORNER_TAG_IDS = [1, 2, 3, 4]
 # 4) 각 모서리 태그의 한 변 길이 (m)
 #    CORNER_TAG_IDS 의 인덱스와 1:1 매칭
 #    예) 태그 1: 0.20 m, 태그 2: 0.20 m, ...
-CORNER_TAG_SIZES_M = [0.20, 0.20, 0.20, 0.20]
+CORNER_TAG_SIZES_M = [0.07, 0.07, 0.07, 0.07]
 
 # 5) 카메라 인덱스
 CAMERA_INDEX = 0
 
-# 6) 윈도우에 표시될 이름
-WINDOW_NAME = "AprilTag 실시간 보기"
-
 # 7) 저장 파일 이름 (고정)
 JSON_FILENAME = "extrinsic_calibration_result.json"
 IMG_FILENAME = "extrinsic_calibration_result.jpeg"
+
+# 설정 부분 끝 =================================================
+
+# 6) 윈도우에 표시될 이름
+WINDOW_NAME = "AprilTag real time detection & extrinsic calibration"
 
 # 8) 태그 좌표계와 로봇 베이스 좌표계의 축 매핑
 # tag / robot
@@ -49,9 +51,6 @@ R_ROBOT_TO_TAG = np.array([
     [0.0, -1.0,  0.0],
     [0.0,  0.0, -1.0],
 ], dtype=float)
-
-# 설정 부분 끝 =================================================
-
 
 def load_camera_params(json_path):
     """

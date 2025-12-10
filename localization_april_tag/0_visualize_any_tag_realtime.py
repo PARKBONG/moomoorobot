@@ -12,7 +12,7 @@ from pupil_apriltags import Detector
 #    - 아래 JSON 예시처럼 fx, fy, cx, cy, dist_coeffs 가 들어있는 파일
 #    - 예: calib_realsense_d405.json
 # 현재 파일(0_visualize_any_tag_realtime.py) 기준 상대 경로임!
-CALIB_JSON_PATH = "./../camera_intrinsic_estimation/intrinsic_calibration_result_20251209_135556.json"
+CALIB_JSON_PATH = "./../camera_intrinsic_estimation/intrinsic_calibration_result_20251210_115333.json"
 
 # 2) 사용하려는 AprilTag 패밀리 이름
 #    - tag36h11 체커보드를 썼다면 "tag36h11"
@@ -20,7 +20,7 @@ TAG_FAMILY = "tag36h11"
 
 # 3) 태그 한 변의 실제 길이 (미터 단위)
 #    - 예) 20 cm 태그라면 0.20
-TAG_SIZE_M = 0.20
+TAG_SIZE_M = 0.02
 
 # 4) 카메라 인덱스
 #    - 웹캠이 하나이면 보통 0

@@ -9,7 +9,7 @@ from pupil_apriltags import Detector
 # ============================================================
 
 # 1) 카메라 보정 결과(JSON) 파일 경로
-CALIB_JSON_PATH = "./../camera_intrinsic_estimation/intrinsic_calibration_result_20251209_135556.json"
+CALIB_JSON_PATH = "./../camera_intrinsic_estimation/intrinsic_calibration_result_20251210_115333.json"
 
 # 2) Extrinsic 결과(JSON) 파일 경로
 EXTRINSIC_JSON_PATH = "./extrinsic_calibration_result.json"
@@ -20,8 +20,8 @@ TAG_FAMILY = "tag36h11"
 # 4) Object / Target 태그 ID 및 크기 (m)
 OBJECT_TAG_ID = 5
 TARGET_TAG_ID = 6
-OBJECT_TAG_SIZE_M = 0.05  # 필요에 맞게 수정
-TARGET_TAG_SIZE_M = 0.05  # 필요에 맞게 수정
+OBJECT_TAG_SIZE_M = 0.02  # 필요에 맞게 수정
+TARGET_TAG_SIZE_M = 0.06  # 필요에 맞게 수정
 
 # 5) 카메라 인덱스
 CAMERA_INDEX = 0
