@@ -12,7 +12,7 @@ from pupil_apriltags import Detector
 #    - 아래 JSON 예시처럼 fx, fy, cx, cy, dist_coeffs 가 들어있는 파일
 #    - 예: calib_realsense_d405.json
 # 현재 파일(0_visualize_any_tag_realtime.py) 기준 상대 경로임!
-CALIB_JSON_PATH = "./../camera_intrinsic_estimation/intrinsic_calibration_result_20251210_115333.json"
+CALIB_JSON_PATH = "./../camera_intrinsic_estimation/intrinsic_calibration_result_20251210_160950.json"
 
 # 2) 사용하려는 AprilTag 패밀리 이름
 #    - tag36h11 체커보드를 썼다면 "tag36h11"
@@ -25,6 +25,10 @@ TAG_SIZE_M = 0.02
 # 4) 카메라 인덱스
 #    - 웹캠이 하나이면 보통 0
 CAMERA_INDEX = 0
+
+# 5) 시각화용 윈도우 크기 조정 비율 (기본값: 1.0)
+#    - 예) 0.5이면 가로/세로 모두 50% 크기로 축소 표시
+ADJUST_WIN_SIZE = 0.5
 
 # 설정 부분 끝 =================================================
 
@@ -150,10 +154,13 @@ def main():
             tag_size=TAG_SIZE_M,
         )
 
+        # 실제 디스플레이용 이미지 복사
+        display = frame.copy()
+
         # 검출된 태그가 하나도 없으면 안내 출력
         if len(detections) == 0:
             cv2.putText(
-                frame,
+                display,
                 "No tags detected",
                 (30, 40),
                 cv2.FONT_HERSHEY_SIMPLEX,
@@ -175,7 +182,7 @@ def main():
                 corners = np.array(det.corners, dtype=np.int32)  # (4, 2)
                 corners = corners.reshape(-1, 1, 2)
                 cv2.polylines(
-                    frame,
+                    display,
                     [corners],
                     isClosed=True,
                     color=(0, 255, 0),
@@ -185,7 +192,7 @@ def main():
                 # --- 2) 태그 중심 위치에 점 찍기 --------------------------
                 c_x, c_y = det.center
                 center_px = (int(c_x), int(c_y))
-                cv2.circle(frame, center_px, 4, (0, 255, 0), -1)
+                cv2.circle(display, center_px, 4, (0, 255, 0), -1)
 
                 # --- 3) 태그의 로컬 좌표축(X,Y,Z) 그리기 -------------------
                 axis_len = 0.04  # 4 cm 정도 길이
@@ -193,10 +200,7 @@ def main():
 
                 # Z축이 카메라를 향하는지 확인 (정상적인 경우 Z축은 카메라 쪽을 향함)
                 z_axis_direction = R[:, 2]  # 태그의 Z축 방향 벡터
-                
-                # 태그 중심에서 카메라 방향으로의 벡터 (단위 벡터로 정규화)
                 to_camera = origin_cam / np.linalg.norm(origin_cam)
-
                 dot_product = np.dot(z_axis_direction, to_camera)
 
                 x_axis_cam = origin_cam + R[:, 0] * axis_len
@@ -211,14 +215,14 @@ def main():
                 if o_uv is not None:
                     # X축: 빨강
                     if x_uv is not None:
-                        cv2.line(frame, o_uv, x_uv, (0, 0, 255), 2)
+                        cv2.line(display, o_uv, x_uv, (0, 0, 255), 2)
                     # Y축: 초록
                     if y_uv is not None:
-                        cv2.line(frame, o_uv, y_uv, (0, 255, 0), 2)
-                    # Z축: 파랑
+                        cv2.line(display, o_uv, y_uv, (0, 255, 0), 2)
+                    # Z축: 파랑 또는 주황(카메라 방향 반대일 때)
                     if z_uv is not None:
-                        z_color = (255, 0, 0) if dot_product > 0 else (0, 165, 255)  # 파랑 or 주황
-                        cv2.line(frame, o_uv, z_uv, z_color, 2)
+                        z_color = (255, 0, 0) if dot_product > 0 else (0, 165, 255)
+                        cv2.line(display, o_uv, z_uv, z_color, 2)
 
                 # --- 4) 태그 ID 및 (x,y,z) 위치 텍스트로 표시 --------------
                 x_m, y_m, z_m = t.flatten()
@@ -227,30 +231,38 @@ def main():
 
                 # ID는 태그 위쪽에
                 cv2.putText(
-                    frame,
+                    display,
                     text_id,
                     (center_px[0] + 5, center_px[1] - 5),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     1,
                     (0, 255, 255),
-                    2,  # thickness를 2로 증가 (bold 효과)
+                    2,
                     cv2.LINE_AA,
                 )
 
                 # 좌표는 태그 아래쪽에 (글씨 작게)
                 cv2.putText(
-                    frame,
+                    display,
                     text_pos,
                     (center_px[0] + 5, center_px[1] + 15),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     0.8,
                     (255, 255, 255),
-                    2,  # thickness를 2로 증가 (bold 효과)
+                    2,
                     cv2.LINE_AA,
                 )
 
-        # 4) 결과 화면 보여주기
-        cv2.imshow("AprilTag Real Time Visualizer", frame)
+        # 4) 결과 화면 보여주기 (창 크기 조절 포함)
+        if ADJUST_WIN_SIZE is not None and ADJUST_WIN_SIZE > 0:
+            h, w = display.shape[:2]
+            new_w = int(w * ADJUST_WIN_SIZE)
+            new_h = int(h * ADJUST_WIN_SIZE)
+            display_resized = cv2.resize(display, (new_w, new_h), interpolation=cv2.INTER_AREA)
+        else:
+            display_resized = display
+
+        cv2.imshow("AprilTag Real Time Visualizer", display_resized)
 
         # 5) ESC 키를 누르면 종료
         key = cv2.waitKey(1) & 0xFF
