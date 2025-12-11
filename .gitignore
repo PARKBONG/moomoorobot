@@ -10,3 +10,6 @@
 
 # Exception: Include JSON files in data folder
 !data/*
+
+# Pytorch
+*.pth
