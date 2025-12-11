@@ -10,9 +10,15 @@ import pyvirtualcam
 
 
 # ==========================
-# 환경 파라미터
+# 전역 설정
 # ==========================
 
+# 카메라 해상도 / FPS
+CAM_WIDTH = 640
+CAM_HEIGHT = 480
+CAM_FPS = 60  # 목표 FPS
+
+# 도로/환경 파라미터
 ROAD_LENGTH = 20.0        # 도로 전체 길이(m) 대략
 NUM_POINTS = 80           # 곡선을 구성할 샘플 포인트 수
 ROAD_HALF_WIDTH = 0.7     # 도로 폭의 절반 (전체 폭 ≈ 1.4m)
@@ -24,15 +30,17 @@ SIDE_LINE_WIDTH = 0.05
 OBSTACLE_SIZE = [0.3, 0.2, 0.2]  # [x_half, y_half, z_half]
 NUM_OBSTACLES = 5
 
-CAM_WIDTH = 1280
-CAM_HEIGHT = 720
-CAM_FPS = 30
+# 제어 키 (OpenCV 창 기준, WASD + ESC)
+KEY_ESC = 27
+KEY_W = ord('w')
+KEY_S = ord('s')
+KEY_A = ord('a')
+KEY_D = ord('d')
 
-KEY_ESC = 27          # ESC
-KEY_W = ord('w')      # 전진
-KEY_S = ord('s')      # 후진
-KEY_A = ord('a')      # 좌측 조향
-KEY_D = ord('d')      # 우측 조향
+
+# ==========================
+# 도로/장애물 생성
+# ==========================
 
 def generate_road_points():
     """
@@ -44,8 +52,9 @@ def generate_road_points():
     points = np.stack([xs, ys], axis=1)
     return points
 
+
 def create_ground():
-    """체크무늬 대신 단색 박스로 바닥 생성."""
+    """체크무늬 plane 대신 단색 박스로 바닥 생성."""
     ground_half_extents = [50.0, 50.0, 0.05]  # 충분히 큰 바닥
     ground_col = p.createCollisionShape(
         p.GEOM_BOX,
@@ -63,44 +72,10 @@ def create_ground():
         basePosition=[ROAD_LENGTH / 2.0, 0.0, -ground_half_extents[2]],
     )
 
-def setup_racecar_joints(car_id):
+
+def create_road(points):
     """
-    racecar.urdf 내에서 steering / wheel 조인트를 자동으로 찾아서 반환.
-    이름에 'steer' 또는 'wheel' 이 포함된 조인트를 사용합니다.
-    """
-    num_joints = p.getNumJoints(car_id)
-    steering_joints = []
-    wheel_joints = []
-
-    print("[INFO] Racecar joints:")
-    for j in range(num_joints):
-        info = p.getJointInfo(car_id, j)
-        name = info[1].decode("utf-8")
-        print(f"  idx={j}, name={name}")
-        lname = name.lower()
-        if "steer" in lname:
-            steering_joints.append(j)
-        if "wheel" in lname:
-            wheel_joints.append(j)
-
-    print("[INFO] steering_joints:", steering_joints)
-    print("[INFO] wheel_joints   :", wheel_joints)
-
-    # 모터를 모두 '힘 없음'으로 초기화해서, 우리가 직접 joint position을 설정해도
-    # 이상한 토크가 붙지 않도록 함
-    for j in steering_joints + wheel_joints:
-        p.setJointMotorControl2(
-            car_id, j,
-            p.VELOCITY_CONTROL,
-            targetVelocity=0.0,
-            force=0.0,
-        )
-
-    return steering_joints, wheel_joints
-
-def create_road(pb_client, points):
-    """
-    곡선을 따라 도로 패치(회색 바닥) + 중앙선(검정) + 양측 빨간선(box)들을 생성.
+    곡선을 따라 도로 패치(회색 바닥) + 중앙선(검정) + 양측 빨간 경계선(box)들을 생성.
     각 선분마다 하나의 road patch를 만든다고 생각하면 됨.
     """
     road_ids = []
@@ -285,6 +260,11 @@ def create_obstacles_with_tags(points, tag_texture_paths):
         "tags": tag_plane_ids,
     }
 
+
+# ==========================
+# 자동차 / 카메라 관련
+# ==========================
+
 def spawn_little_car():
     """
     PyBullet 내장 racecar를 '꼬마 자동차'로 사용.
@@ -296,6 +276,42 @@ def spawn_little_car():
     return car_id
 
 
+def setup_racecar_joints(car_id):
+    """
+    racecar.urdf 내에서 steering / wheel 조인트를 자동으로 찾아서 반환.
+    이름에 'steer' 또는 'wheel' 이 포함된 조인트를 사용합니다.
+    """
+    num_joints = p.getNumJoints(car_id)
+    steering_joints = []
+    wheel_joints = []
+
+    print("[INFO] Racecar joints:")
+    for j in range(num_joints):
+        info = p.getJointInfo(car_id, j)
+        name = info[1].decode("utf-8")
+        print(f"  idx={j}, name={name}")
+        lname = name.lower()
+        if "steer" in lname:
+            steering_joints.append(j)
+        if "wheel" in lname:
+            wheel_joints.append(j)
+
+    print("[INFO] steering_joints:", steering_joints)
+    print("[INFO] wheel_joints   :", wheel_joints)
+
+    # 모터를 모두 '힘 없음'으로 초기화해서, 우리가 직접 joint position을 설정해도
+    # 이상한 토크가 붙지 않도록 함
+    for j in steering_joints + wheel_joints:
+        p.setJointMotorControl2(
+            car_id, j,
+            p.VELOCITY_CONTROL,
+            targetVelocity=0.0,
+            force=0.0,
+        )
+
+    return steering_joints, wheel_joints
+
+
 def compute_ego_camera(car_id):
     """
     자동차에 붙어있는 카메라의 위치와 방향을 계산.
@@ -303,18 +319,15 @@ def compute_ego_camera(car_id):
     """
     base_pos, base_orn = p.getBasePositionAndOrientation(car_id)
     base_pos = np.array(base_pos)
-    base_orn = np.array(base_orn)
 
-    # 차량 body의 z축 회전(yaw) 기준 전방 벡터 추출
     # Euler로 변환
     roll, pitch, yaw = p.getEulerFromQuaternion(base_orn)
 
     forward = np.array([math.cos(yaw), math.sin(yaw), 0.0])
     up = np.array([0.0, 0.0, 1.0])
-    right = np.array([-forward[1], forward[0], 0.0])
 
     # 카메라 오프셋 (차체 앞쪽 + 위쪽)
-    cam_offset = 0.3 * forward + 0.0 * right + 0.2 * up
+    cam_offset = 0.3 * forward + 0.2 * up
     cam_eye = base_pos + cam_offset
     cam_target = cam_eye + forward * 2.0
 
@@ -327,7 +340,7 @@ def compute_ego_camera(car_id):
     return view_matrix
 
 
-def set_topdown_debug_camera(points, car_id=None):
+def set_topdown_debug_camera(points):
     """
     PyBullet GUI용 카메라를 위에서 내려다보는 "맵 뷰"로 설정.
     도로 중앙 근처를 가운데로 잡음.
@@ -336,7 +349,6 @@ def set_topdown_debug_camera(points, car_id=None):
     cx, cy = float(center[0]), float(center[1])
     target_pos = [cx, cy, 0.0]
 
-    # 적당한 거리와 pitch
     distance = 10.0
     yaw = 90.0
     pitch = -89.0  # 거의 수직
@@ -348,6 +360,10 @@ def set_topdown_debug_camera(points, car_id=None):
     )
 
 
+# ==========================
+# 메인 환경
+# ==========================
+
 def My_Pybullet_CAM_ENV():
     """
     PyBullet GUI에서:
@@ -356,7 +372,8 @@ def My_Pybullet_CAM_ENV():
       - 꼬마 자동차(racecar)
       - GUI 카메라는 맵 뷰(탑다운)
     를 보여주고,
-    동시에 자동차에 달린 카메라 화면을 OBS Virtual Camera로 스트리밍.
+    동시에 자동차에 달린 카메라 화면을 OBS Virtual Camera와
+    OpenCV 창으로 스트리밍하며, OpenCV 창에서 WASD로 조종.
     """
 
     # 1) PyBullet 연결 및 기본 세팅
@@ -365,13 +382,12 @@ def My_Pybullet_CAM_ENV():
     p.setGravity(0, 0, -9.81)
     p.configureDebugVisualizer(p.COV_ENABLE_GUI, 0)
 
-    # 바닥 플레인
-    # p.loadURDF("plane.urdf")
-    create_ground()  # 단색 바닥
+    # 바닥 플레인 대신 단색 바닥
+    create_ground()
 
     # 2) 도로 곡선 생성 및 도로/라인 만들기
     road_points = generate_road_points()
-    road_env = create_road(physics_client, road_points)
+    _road_env = create_road(road_points)
 
     # 3) 장애물 + AprilTag 텍스처
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -382,7 +398,7 @@ def My_Pybullet_CAM_ENV():
         os.path.join(tag_dir, "tag36h11_2.png"),
         os.path.join(tag_dir, "tag36h11_3.png"),
     ]
-    obstacle_env = create_obstacles_with_tags(road_points, tag_texture_paths)
+    _obstacle_env = create_obstacles_with_tags(road_points, tag_texture_paths)
 
     # 4) 꼬마 자동차 스폰
     car_id = spawn_little_car()
@@ -390,21 +406,25 @@ def My_Pybullet_CAM_ENV():
     # 4-1) 자동차 조인트 인덱스 (조향/바퀴)
     steering_joints, wheel_joints = setup_racecar_joints(car_id)
 
-    # 4-2) 자동차 상태 변수 (kinematic bicycle model 비슷하게)
+    # 4-2) 자동차 상태 변수 (kinematic)
     steering_angle = 0.0      # 조향각 [rad]
-    car_speed = 0.0           # 차량 속도 [m/s]
-    max_steering_angle = 0.6  # 약 ±34도
-    max_speed = 5000           # m/s 정도 (원하면 조정)
-    accel = 10               # 키 입력당 가속량
-    brake_decay = 0.1         # 자연 감속 계수
-    steer_step = 0.03         # 키 입력당 조향각 변화
+    car_speed = 0.0           # 속도 [m/s]
+    max_steering_angle = 0.6  # ±34도 정도
+    max_speed = 5.0           # m/s
+    accel = 0.1               # 전/후진 시 가속량
+    brake_decay = 0.08        # 입력 없을 때 감속량
+    steer_step = 0.03         # 조향키 1번당 변화량
 
     wheel_radius = 0.05       # 바퀴 반지름 (대략)
-    wheel_rotation = 0.0      # 바퀴 회전각 누적 (시각용)
-    wheelbase = 0.6           # 앞/뒤 차축 사이 거리 (대략)
-    
+    wheel_rotation = 0.0      # 바퀴 회전각 누적
+    wheelbase = 0.6           # 앞/뒤 축 거리 (대략)
+
     # 5) GUI 카메라를 탑다운 맵 뷰로 설정
-    set_topdown_debug_camera(road_points, car_id=car_id)
+    set_topdown_debug_camera(road_points)
+
+    # FPS 모니터링용
+    ema_fps = None
+    frame_count = 0
 
     # 6) 가상 카메라(OBS Virtual Camera) 열기
     with pyvirtualcam.Camera(
@@ -417,16 +437,15 @@ def My_Pybullet_CAM_ENV():
     ) as cam:
         print("[INFO] OBS Virtual Camera device:", cam.device)
         print("[INFO] Streaming ego-camera view to OBS Virtual Camera.")
-
-        dt = 1.0 / CAM_FPS
-        last_time = time.time()
+        print("[INFO] Control keys in OpenCV window: W/S (forward/back), A/D (steer), ESC (quit).")
 
         try:
             while True:
+                loop_start = time.time()
+
                 # -----------------------------
                 # (A) 차량 제어: OpenCV 키 입력
                 # -----------------------------
-                # 키 입력은 '이전에 표시한 프레임의 창'에서 읽힘
                 key = cv2.waitKey(1) & 0xFF
 
                 if key == KEY_ESC:
@@ -486,7 +505,7 @@ def My_Pybullet_CAM_ENV():
                         force=1.0,
                     )
 
-                wheel_rotation += (v / max(wheel_radius, 1e-3)) * dt
+                wheel_rotation += (v / max(wheel_radius, 1e-3)) * (1.0 / max(CAM_FPS, 1))
                 for j in wheel_joints:
                     p.setJointMotorControl2(
                         car_id, j,
@@ -509,19 +528,22 @@ def My_Pybullet_CAM_ENV():
                 aspect = CAM_WIDTH / float(CAM_HEIGHT)
                 near = 0.01
                 far = 50.0
-                proj_matrix = p.computeProjectionMatrixFOV(
-                    fov=fov,
-                    aspect=aspect,
-                    nearVal=near,
-                    farVal=far
-                )
+
+                # 빠른 렌더링을 위한 flags (segmentation mask 비활성화)
+                flags = p.ER_NO_SEGMENTATION_MASK
 
                 img = p.getCameraImage(
                     CAM_WIDTH,
                     CAM_HEIGHT,
                     viewMatrix=view_matrix,
-                    projectionMatrix=proj_matrix,
-                    renderer=p.ER_BULLET_HARDWARE_OPENGL
+                    projectionMatrix=p.computeProjectionMatrixFOV(
+                        fov=fov,
+                        aspect=aspect,
+                        nearVal=near,
+                        farVal=far
+                    ),
+                    renderer=p.ER_BULLET_HARDWARE_OPENGL,
+                    flags=flags,
                 )
 
                 rgba = np.reshape(img[2], (CAM_HEIGHT, CAM_WIDTH, 4)).astype(np.uint8)
@@ -536,11 +558,21 @@ def My_Pybullet_CAM_ENV():
 
                 cv2.imshow("Sim Ego Camera (Control Window)", frame_bgr)
 
-                # FPS 맞추기용 (여유 있으면 없어도 됨)
-                now = time.time()
-                if now - last_time < dt:
-                    time.sleep(dt - (now - last_time))
-                last_time = now
+                # -----------------------------
+                # (G) FPS 측정 (간단한 EMA)
+                # -----------------------------
+                frame_time = time.time() - loop_start
+                if frame_time > 0:
+                    inst_fps = 1.0 / frame_time
+                    if ema_fps is None:
+                        ema_fps = inst_fps
+                    else:
+                        alpha = 0.1
+                        ema_fps = alpha * inst_fps + (1 - alpha) * ema_fps
+
+                    frame_count += 1
+                    if frame_count % 120 == 0:
+                        print(f"[INFO] Approx. loop FPS: {ema_fps:.1f}")
 
         except KeyboardInterrupt:
             print("\n[INFO] Interrupted by user (KeyboardInterrupt).")
