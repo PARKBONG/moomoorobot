@@ -23,7 +23,7 @@ PATTERN_SIZE = (8, 6)  # (가로 코너 개수, 세로 코너 개수)
 SQUARE_SIZE = 0.03  # 3 cm
 
 # 3) 카메라 인덱스
-CAMERA_INDEX = 0 # Intel Realsense 기준으로 카메라가 2개 연결된걸로 인식됨. 0혹은 1시도 필요. 
+CAMERA_INDEX = 3 # Intel Realsense 기준으로 카메라가 2개 연결된걸로 인식됨. 0혹은 1시도 필요. 
 
 # 4) 최소 촬영 장수 (너무 적으면 보정 정확도가 떨어짐)
 MIN_SAMPLES = 50
